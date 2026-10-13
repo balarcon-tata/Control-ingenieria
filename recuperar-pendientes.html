@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>INGENIERÍA | Diagnóstico local de pendientes</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:#101820;color:#e8edf3;line-height:1.55}
+main{max-width:950px;margin:42px auto;padding:0 20px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+a{color:#a6c8ff}h1{font-size:clamp(24px,4vw,34px);margin:8px 0}h2{font-size:19px;margin:0 0 9px}
+.eyebrow{font-size:12px;color:#8dadcb;letter-spacing:.13em;font-weight:700}
+.panel{background:#192430;border:1px solid #344353;border-radius:16px;padding:21px;margin:20px 0}
+.muted{color:#b7c3d0}strong{font-weight:700}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0}
+.stat{border:1px solid #394a5c;background:#111e2b;border-radius:12px;padding:15px}
+.stat b{font-size:32px;display:block;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:#b7c3d0}
+button{background:#235cd7;color:white;border:none;border-radius:9px;padding:11px 16px;font:inherit;font-weight:600;cursor:pointer}
+button.secondary{background:#283a4c}
+button:disabled{opacity:.5;cursor:not-allowed}
+.buttons{display:flex;gap:10px;flex-wrap:wrap}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:12px 10px;text-align:left;border-bottom:1px solid #32404f;vertical-align:top}
+th{color:#bbcad8;font-size:12px}td:first-child{font-weight:600}
+.tablewrap{overflow-x:auto}
+.note{border-left:3px solid #6395f3;padding:10px 14px;background:#14253a;border-radius:4px}
+.important{color:#f2d3a2}#error{color:#f5a4aa}
+#status{font-size:14px}
+@media(max-width:600px){.stats{grid-template-columns:1fr}main{margin:24px auto}th,td{padding:9px 6px}}
+</style>
+</head>
+<body>
+<main>
+<header><div class="eyebrow">TATA · INGENIERÍA / CONTROL</div><a href="./">Volver a la aplicación</a></header>
+<h1>Revisión local de pendientes de Jimmy</h1>
+<p class="muted">Esta página revisa la copia guardada en <strong>este navegador y este perfil de Firefox</strong>. No requiere consola, no modifica datos, no inicia sesión ni envía información a Supabase.</p>
+<section class="panel">
+<h2>Resultado de la revisión</h2>
+<p id="status" class="muted">Analizando el almacenamiento de este navegador…</p>
+<div class="stats">
+  <div class="stat"><b id="total">—</b><span>Actividades en copia local</span></div>
+  <div class="stat"><b id="found">—</b><span>Asignadas a Jimmy (sin duplicados)</span></div>
+  <div class="stat"><b id="waiting">—</b><span>Pendientes de Jimmy en cola local</span></div>
+</div>
+<p id="error"></p>
+<div class="buttons">
+<button id="export" disabled>Guardar copia de pendientes de Jimmy</button>
+<button id="export-all" class="secondary" disabled>Resguardar todas las actividades locales</button>
+<button id="again" class="secondary">Revisar nuevamente</button>
+</div>
+</section>
+<section class="panel">
+<h2>Actividades encontradas para Jimmy</h2>
+<div class="tablewrap"><table><thead><tr><th>Actividad</th><th>Estado</th><th>Origen</th><th>Registrada</th></tr></thead><tbody id="list"></tbody></table></div>
+<p id="empty" class="muted"></p>
+</section>
+<p class="note"><strong>Importante:</strong> esta página es de solo lectura. Si aparecen actividades, usa «Guardar copia» antes de intentar recuperarlas. Si muestra cero, eso solo significa que no están en estas dos claves del almacenamiento local actual; podrían existir en otro perfil o respaldo. No borres cookies, datos del sitio ni cambies de navegador.</p>
+</main>
+<script>
+(function(){
+  'use strict';
+  var CACHE='ingenieria-control-command-center-clean-v1';
+  var QUEUE='ic-pending-changes-v2';
+  var JIMMY='mlh01xw2';
+  var results=[];
+  var all=[];
+  function el(id){return document.getElementById(id);}
+  function read(key){
+    try {
+      var raw=localStorage.getItem(key);
+      return raw?JSON.parse(raw):{};
+    } catch(e) {
+      el('error').textContent='No se pudo leer '+key+': '+e.message;
+      return {};
+    }
+  }
+  function dateText(str){
+    if(!str)return 'Sin fecha';
+    var d=new Date(str);
+    return isNaN(d.getTime())?String(str):d.toLocaleString('es-GT');
+  }
+  function download(name,payload){
+    var blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');a.href=url;a.download=name;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  }
+  function addCell(row,value){var td=document.createElement('td');td.textContent=String(value==null?'':value);row.appendChild(td);}
+  function inspect(){
+    var cached=read(CACHE),queue=read(QUEUE);
+    var tasks=Array.isArray(cached.tasks)?cached.tasks:[];
+    var queued=Array.isArray(queue.tasks)?queue.tasks:[];
+    all=tasks;
+    var members=Array.isArray(cached.members)?cached.members:[];
+    var jimmyIds=new Set([JIMMY]);
+    members.forEach(function(m){if(m && /jimmy/i.test(String(m.name||'')+' '+String(m.username||'')))jimmyIds.add(m.id);});
+    var local=tasks.filter(function(t){return t&&jimmyIds.has(t.ownerId);});
+    var waiting=queued.filter(function(t){return t&&jimmyIds.has(t.ownerId);});
+    var byId=new Map();
+    local.forEach(function(t,i){byId.set(t.id||'local-'+i,{task:t,origin:'Copia local'});});
+    waiting.forEach(function(t,i){byId.set(t.id||'queue-'+i,{task:t,origin:byId.has(t.id)?'Copia y cola':'Cola sin sincronizar'});});
+    results=Array.from(byId.values());
+    el('total').textContent=String(tasks.length);
+    el('found').textContent=String(results.length);
+    el('waiting').textContent=String(waiting.length);
+    el('export').disabled=results.length===0;
+    el('export-all').disabled=tasks.length===0;
+    el('status').textContent=results.length?
+      'Se encontraron '+results.length+' actividades vinculadas a Jimmy en este Firefox. Guarda una copia antes de recuperarlas.':
+      'No se encontraron actividades asignadas a Jimmy en la copia ni en la cola de este Firefox.';
+    var tb=el('list');tb.replaceChildren();
+    results.forEach(function(item){
+      var row=document.createElement('tr'),t=item.task;
+      addCell(row,t.title||'(Sin nombre)');
+      addCell(row,t.status||'Sin estado');
+      addCell(row,item.origin);
+      addCell(row,dateText(t.createdAt));
+      tb.appendChild(row);
+    });
+    el('empty').textContent=results.length?'':'Si esperabas resultados, no significa que hayan sido borrados: puede tratarse de otro perfil de navegador o de una copia local ya reemplazada.';
+  }
+  el('again').addEventListener('click',inspect);
+  el('export').addEventListener('click',function(){download('recuperacion_pendientes_jimmy.json',{exportedAt:new Date().toISOString(),source:'Firefox localStorage · Ingenieria Control',ownerId:JIMMY,tasks:results.map(function(x){return x.task;})});});
+  el('export-all').addEventListener('click',function(){download('respaldo_actividades_locales.json',{exportedAt:new Date().toISOString(),source:'Firefox localStorage · Ingenieria Control',tasks:all});});
+  inspect();
+})();
+</script>
+</body>
+</html>
